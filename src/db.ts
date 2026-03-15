@@ -6,6 +6,7 @@ export interface Book {
   author: string;
   coverUrl?: string;
   description?: string;
+  externalId?: string;
 }
 
 export interface LibraryEntry {
@@ -23,6 +24,10 @@ export class LibraryDatabase extends Dexie {
     this.version(1).stores({
       books: '++id, title, author, [title+author]', // index on title, author, and compound
       library: '++id, bookId, dateAdded' // index on bookId and dateAdded
+    });
+    this.version(2).stores({
+      books: '++id, title, author, externalId, [title+author]',
+      library: '++id, bookId, dateAdded'
     });
   }
 }

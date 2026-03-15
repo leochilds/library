@@ -1,25 +1,26 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Book } from './db';
-import { Search as SearchIcon, PlusCircle, CheckCircle } from 'lucide-react';
+import { Search as SearchIcon, PlusCircle, CheckCircle, Loader2, BookMarked } from 'lucide-react';
 
 export default function SearchScreen() {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [apiResults, setApiResults] = useState<Book[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
-  // Debounce the search input so we don't query the DB on every keystroke
+  // Debounce the search input
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedQuery(query);
-    }, 300);
+    }, 500);
     return () => clearTimeout(timer);
   }, [query]);
 
-  // Query the global books table using Dexie
-  const searchResults = useLiveQuery(() => {
+  // Local database search
+  const localSearchResults = useLiveQuery(() => {
     if (!debouncedQuery) return [];
     
-    // Convert query to lowercase for case-insensitive partial matching
     const lowerQuery = debouncedQuery.toLowerCase();
     
     return db.books
@@ -27,21 +28,157 @@ export default function SearchScreen() {
         book.title.toLowerCase().includes(lowerQuery) || 
         book.author.toLowerCase().includes(lowerQuery)
       )
-      .limit(50)
+      .limit(20)
       .toArray();
   }, [debouncedQuery], []);
 
-  // Fetch all library entries to quickly check for duplicates
-  const libraryEntries = useLiveQuery(() => db.library.toArray(), [], []);
-  const libraryBookIds = new Set(libraryEntries.map(e => e.bookId));
+  // Remote API search
+  useEffect(() => {
+    if (!debouncedQuery) {
+      setApiResults([]);
+      return;
+    }
 
-  const addToLibrary = async (bookId: number) => {
-    if (libraryBookIds.has(bookId)) return;
+    let isMounted = true;
     
-    await db.library.add({
-      bookId,
-      dateAdded: Date.now()
+    const fetchApiBooks = async () => {
+      setIsSearching(true);
+      try {
+        const [googleRes, olRes] = await Promise.allSettled([
+          fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(debouncedQuery)}&maxResults=20`),
+          fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(debouncedQuery)}&limit=20`)
+        ]);
+
+        let googleBooks: Book[] = [];
+        if (googleRes.status === 'fulfilled') {
+          try {
+            const data = await googleRes.value.json();
+            googleBooks = (data.items || []).map((item: any) => ({
+              title: item.volumeInfo.title || 'Unknown Title',
+              author: item.volumeInfo.authors?.join(', ') || 'Unknown Author',
+              coverUrl: item.volumeInfo.imageLinks?.thumbnail?.replace('http:', 'https:'),
+              description: item.volumeInfo.description,
+              externalId: `google_${item.id}`
+            }));
+          } catch (e) {
+            console.error('Google Books API parsing error', e);
+          }
+        }
+
+        let olBooks: Book[] = [];
+        if (olRes.status === 'fulfilled') {
+          try {
+            const data = await olRes.value.json();
+            olBooks = (data.docs || []).map((doc: any) => ({
+              title: doc.title || 'Unknown Title',
+              author: doc.author_name?.[0] || 'Unknown Author',
+              coverUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : undefined,
+              externalId: `ol_${doc.key?.replace('/works/', '')}`
+            }));
+          } catch (e) {
+            console.error('Open Library API parsing error', e);
+          }
+        }
+
+        if (isMounted) {
+          setApiResults([...googleBooks, ...olBooks]);
+        }
+      } catch (error) {
+        console.error('API Search Error', error);
+      } finally {
+        if (isMounted) {
+          setIsSearching(false);
+        }
+      }
+    };
+
+    fetchApiBooks();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [debouncedQuery]);
+
+  // Combine and deduplicate local and remote results
+  const combinedResults = useMemo(() => {
+    const results: Book[] = [...(localSearchResults || [])];
+    const seen = new Set(results.map(b => `${b.title.toLowerCase()}|${b.author.toLowerCase()}`));
+
+    for (const book of apiResults) {
+      const key = `${book.title.toLowerCase()}|${book.author.toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        results.push(book);
+      }
+    }
+
+    return results;
+  }, [localSearchResults, apiResults]);
+
+  // Fetch all library entries and their corresponding book details
+  const libraryBookDetails = useLiveQuery(async () => {
+    const entries = await db.library.toArray();
+    const bookIds = entries.map(e => e.bookId);
+    // Fetch all books that are in the library
+    const books = await Promise.all(bookIds.map(id => db.books.get(id)));
+    return books.filter(Boolean) as Book[];
+  }, [], []);
+
+  // Create a fast lookup set for books in the library
+  const libraryKeys = useMemo(() => {
+    const keys = new Set<string>();
+    libraryBookDetails?.forEach(book => {
+      if (book.id) keys.add(`id:${book.id}`);
+      if (book.externalId) keys.add(`ext:${book.externalId}`);
+      keys.add(`title_author:${book.title.toLowerCase()}|${book.author.toLowerCase()}`);
     });
+    return keys;
+  }, [libraryBookDetails]);
+
+  const isInLibrary = (book: Book) => {
+    if (book.id && libraryKeys.has(`id:${book.id}`)) return true;
+    if (book.externalId && libraryKeys.has(`ext:${book.externalId}`)) return true;
+    if (libraryKeys.has(`title_author:${book.title.toLowerCase()}|${book.author.toLowerCase()}`)) return true;
+    return false;
+  };
+
+  const addToLibrary = async (book: Book) => {
+    let bookId = book.id;
+    
+    // If book is from API, it won't have a local id yet
+    if (!bookId) {
+      // Double check if it was somehow added globally without being in localSearchResults
+      const existing = await db.books
+        .filter(b => 
+          (book.externalId !== undefined && b.externalId === book.externalId) || 
+          (b.title.toLowerCase() === book.title.toLowerCase() && b.author.toLowerCase() === book.author.toLowerCase())
+        )
+        .first();
+        
+      if (existing && existing.id) {
+        bookId = existing.id;
+      } else {
+        // Save to local database
+        bookId = await db.books.add({
+          title: book.title,
+          author: book.author,
+          coverUrl: book.coverUrl,
+          description: book.description,
+          externalId: book.externalId
+        });
+      }
+    }
+
+    if (bookId) {
+      // Check if it's already in the library table
+      const existingEntry = await db.library.where({ bookId }).first();
+      if (!existingEntry) {
+        await db.library.add({
+          bookId,
+          dateAdded: Date.now()
+        });
+      }
+    }
   };
 
   return (
@@ -68,17 +205,23 @@ export default function SearchScreen() {
             <p className="text-lg font-medium">Find your next book</p>
             <p className="text-sm mt-1">Start typing to search through the global catalog.</p>
           </div>
-        ) : searchResults.length === 0 ? (
+        ) : isSearching && combinedResults.length === 0 ? (
+          <div className="flex flex-col items-center justify-center mt-10 text-gray-500">
+            <Loader2 className="h-8 w-8 animate-spin mb-4 text-blue-500" />
+            <p>Searching catalogs...</p>
+          </div>
+        ) : combinedResults.length === 0 ? (
           <div className="text-center text-gray-500 mt-10">
             <p>No books found matching "{debouncedQuery}"</p>
           </div>
         ) : (
           <div className="space-y-4 pb-20">
-            {searchResults.map((book) => {
-              const inLibrary = book.id ? libraryBookIds.has(book.id) : false;
+            {combinedResults.map((book, index) => {
+              const inLibrary = isInLibrary(book);
+              const key = book.id ? `id-${book.id}` : book.externalId ? `ext-${book.externalId}` : `idx-${index}`;
               
               return (
-                <div key={book.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
+                <div key={key} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
                   {book.coverUrl ? (
                     <img src={book.coverUrl} alt={book.title} className="w-16 h-24 object-cover rounded shadow-sm bg-gray-200" />
                   ) : (
@@ -96,7 +239,7 @@ export default function SearchScreen() {
                   </div>
                   
                   <button
-                    onClick={() => book.id && addToLibrary(book.id)}
+                    onClick={() => addToLibrary(book)}
                     disabled={inLibrary}
                     className={`shrink-0 p-2 rounded-full transition-colors ${
                       inLibrary 
@@ -116,6 +259,3 @@ export default function SearchScreen() {
     </div>
   );
 }
-
-// Re-import BookMarked that was accidentally omitted in the generated template
-import { BookMarked } from 'lucide-react';
