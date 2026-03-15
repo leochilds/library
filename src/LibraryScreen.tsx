@@ -30,9 +30,7 @@ export default function LibraryScreen() {
     return booksWithDetails;
   }, [], []);
 
-  const removeFromLibrary = async (e: React.MouseEvent, libraryId: number) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const removeFromLibrary = async (libraryId: number) => {
     if (confirm('Are you sure you want to remove this book from your library?')) {
       await db.library.delete(libraryId);
     }
@@ -59,45 +57,47 @@ export default function LibraryScreen() {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pb-20">
             {libraryBooks.map((book) => (
-              <Link 
-                key={book.libraryId} 
-                to={`/book/${book.id}`}
-                className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col relative group hover:shadow-md transition-shadow"
-              >
+              <div key={book.libraryId} className="relative group">
                 <button
-                  onClick={(e) => removeFromLibrary(e, book.libraryId)}
+                  onClick={() => removeFromLibrary(book.libraryId)}
                   className="absolute top-2 right-2 p-1.5 bg-white/80 backdrop-blur-sm text-red-500 rounded-full shadow-sm hover:bg-red-50 transition-colors z-10"
                   title="Remove from library"
+                  aria-label={`Remove ${book.title} from library`}
                 >
                   <Trash2 size={16} />
                 </button>
                 
-                <div className="aspect-[2/3] w-full bg-gray-100 relative">
-                  {book.coverUrl ? (
-                    <img 
-                      src={book.coverUrl} 
-                      alt={book.title} 
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex flex-col justify-center items-center text-indigo-200 bg-indigo-50">
-                      <BookMarked size={32} />
-                    </div>
-                  )}
-                </div>
-                
-                <div className="p-3 flex-1 flex flex-col">
-                  <h3 className="text-sm font-semibold text-gray-900 line-clamp-2 leading-tight mb-1" title={book.title}>
-                    {book.title}
-                  </h3>
-                  <p className="text-xs text-gray-600 line-clamp-1 mb-2" title={book.author}>
-                    {book.author}
-                  </p>
-                  <p className="text-[10px] text-gray-400 mt-auto">
-                    Added {new Date(book.dateAdded).toLocaleDateString()}
-                  </p>
-                </div>
-              </Link>
+                <Link 
+                  to={`/book/${book.id}`}
+                  className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col hover:shadow-md transition-shadow block"
+                >
+                  <div className="aspect-[2/3] w-full bg-gray-100 relative">
+                    {book.coverUrl ? (
+                      <img 
+                        src={book.coverUrl} 
+                        alt={book.title} 
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex flex-col justify-center items-center text-indigo-200 bg-indigo-50">
+                        <BookMarked size={32} />
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="p-3 flex-1 flex flex-col">
+                    <h3 className="text-sm font-semibold text-gray-900 line-clamp-2 leading-tight mb-1" title={book.title}>
+                      {book.title}
+                    </h3>
+                    <p className="text-xs text-gray-600 line-clamp-1 mb-2" title={book.author}>
+                      {book.author}
+                    </p>
+                    <p className="text-[10px] text-gray-400 mt-auto">
+                      Added {new Date(book.dateAdded).toLocaleDateString()}
+                    </p>
+                  </div>
+                </Link>
+              </div>
             ))}
           </div>
         )}
