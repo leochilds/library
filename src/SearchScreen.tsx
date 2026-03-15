@@ -3,6 +3,12 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Book } from './db';
 import { Search as SearchIcon, PlusCircle, CheckCircle, Loader2, BookMarked, SlidersHorizontal, X } from 'lucide-react';
 
+export type SortField = 'title' | 'author' | 'publisher' | 'publishYear' | 'isbn';
+export interface SortOption {
+  field: SortField;
+  direction: 'asc' | 'desc';
+}
+
 export interface SearchFilters {
   query: string;
   title: string;
@@ -25,6 +31,7 @@ const defaultFilters: SearchFilters = {
 
 export default function SearchScreen() {
   const [filters, setFilters] = useState<SearchFilters>(defaultFilters);
+  const [sorts, setSorts] = useState<SortOption[]>([]);
   const [debouncedFilters, setDebouncedFilters] = useState<SearchFilters>(defaultFilters);
   const [apiResults, setApiResults] = useState<Book[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -189,8 +196,28 @@ export default function SearchScreen() {
       }
     }
 
+    if (sorts.length > 0) {
+      results.sort((a, b) => {
+        for (const sort of sorts) {
+          let valA = a[sort.field as keyof Book];
+          let valB = b[sort.field as keyof Book];
+          
+          if (!valA && valB) return 1;
+          if (valA && !valB) return -1;
+          if (!valA && !valB) continue;
+          
+          valA = String(valA).toLowerCase();
+          valB = String(valB).toLowerCase();
+          
+          if (valA < valB) return sort.direction === 'asc' ? -1 : 1;
+          if (valA > valB) return sort.direction === 'asc' ? 1 : -1;
+        }
+        return 0;
+      });
+    }
+
     return results;
-  }, [localSearchResults, apiResults]);
+  }, [localSearchResults, apiResults, sorts]);
 
   // Fetch all library entries and their corresponding book details
   const libraryBookDetails = useLiveQuery(async () => {
@@ -353,12 +380,70 @@ export default function SearchScreen() {
                 placeholder="e.g. 1997"
               />
             </div>
+            <div className="col-span-1 sm:col-span-2 border-t border-gray-200 pt-4 mt-2">
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Sort Results By</h3>
+              {sorts.map((sort, index) => (
+                <div key={index} className="flex flex-wrap gap-2 mb-2 items-center">
+                  <span className="text-sm text-gray-500 w-16">{index === 0 ? 'Sort by' : 'Then by'}</span>
+                  <select
+                    value={sort.field}
+                    onChange={(e) => {
+                      const newSorts = [...sorts];
+                      newSorts[index].field = e.target.value as SortField;
+                      setSorts(newSorts);
+                    }}
+                    className="border border-gray-300 rounded-lg text-sm px-2 py-1 bg-white focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="title">Title</option>
+                    <option value="author">Author</option>
+                    <option value="publishYear">Publish Year</option>
+                    <option value="publisher">Publisher</option>
+                    <option value="isbn">ISBN</option>
+                  </select>
+                  <select
+                    value={sort.direction}
+                    onChange={(e) => {
+                      const newSorts = [...sorts];
+                      newSorts[index].direction = e.target.value as 'asc' | 'desc';
+                      setSorts(newSorts);
+                    }}
+                    className="border border-gray-300 rounded-lg text-sm px-2 py-1 bg-white focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
+                  </select>
+                  <button
+                    onClick={() => {
+                      const newSorts = [...sorts];
+                      newSorts.splice(index, 1);
+                      setSorts(newSorts);
+                    }}
+                    className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-50 transition-colors"
+                    title="Remove sort"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
+              {sorts.length < 5 && (
+                <button
+                  onClick={() => setSorts([...sorts, { field: 'publishYear', direction: 'desc' }])}
+                  className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1 mt-2 font-medium"
+                >
+                  <PlusCircle size={14} /> Add Sort
+                </button>
+              )}
+            </div>
+
             <div className="col-span-1 sm:col-span-2 flex justify-end mt-2">
               <button
-                onClick={() => setFilters(defaultFilters)}
-                className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1"
+                onClick={() => {
+                  setFilters(defaultFilters);
+                  setSorts([]);
+                }}
+                className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1 font-medium"
               >
-                Clear Filters
+                Clear All
               </button>
             </div>
           </div>
