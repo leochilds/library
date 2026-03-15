@@ -60,17 +60,17 @@ export default function SearchScreen() {
         if (debouncedFilters.author) {
            match = match && book.author.toLowerCase().includes(debouncedFilters.author.toLowerCase());
         }
-        if (debouncedFilters.publisher && book.publisher) {
-           match = match && book.publisher.toLowerCase().includes(debouncedFilters.publisher.toLowerCase());
+        if (debouncedFilters.publisher) {
+           match = match && !!book.publisher && book.publisher.toLowerCase().includes(debouncedFilters.publisher.toLowerCase());
         }
-        if (debouncedFilters.subject && book.subject) {
-           match = match && book.subject.toLowerCase().includes(debouncedFilters.subject.toLowerCase());
+        if (debouncedFilters.subject) {
+           match = match && !!book.subject && book.subject.toLowerCase().includes(debouncedFilters.subject.toLowerCase());
         }
-        if (debouncedFilters.isbn && book.isbn) {
-           match = match && book.isbn.toLowerCase().includes(debouncedFilters.isbn.toLowerCase());
+        if (debouncedFilters.isbn) {
+           match = match && !!book.isbn && book.isbn.toLowerCase().includes(debouncedFilters.isbn.toLowerCase());
         }
-        if (debouncedFilters.publishYear && book.publishYear) {
-           match = match && book.publishYear.includes(debouncedFilters.publishYear);
+        if (debouncedFilters.publishYear) {
+           match = match && !!book.publishYear && book.publishYear.includes(debouncedFilters.publishYear);
         }
         
         return match;
