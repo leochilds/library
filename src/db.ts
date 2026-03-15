@@ -7,6 +7,10 @@ export interface Book {
   coverUrl?: string;
   description?: string;
   externalId?: string;
+  publisher?: string;
+  subject?: string;
+  isbn?: string;
+  publishYear?: string;
 }
 
 export interface LibraryEntry {
@@ -27,6 +31,10 @@ export class LibraryDatabase extends Dexie {
     });
     this.version(2).stores({
       books: '++id, title, author, externalId, [title+author]',
+      library: '++id, bookId, dateAdded'
+    });
+    this.version(3).stores({
+      books: '++id, title, author, externalId, publisher, subject, isbn, publishYear, [title+author]',
       library: '++id, bookId, dateAdded'
     });
   }
