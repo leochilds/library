@@ -409,8 +409,16 @@ export default function SearchScreen() {
                     }}
                     className="border border-gray-300 rounded-lg text-sm px-2 py-1 bg-white focus:ring-blue-500 focus:border-blue-500"
                   >
-                    <option value="asc">Ascending</option>
-                    <option value="desc">Descending</option>
+                    <option value="asc">
+                      {sort.field === 'publishYear' ? 'Oldest first' :
+                       ['title', 'author', 'publisher'].includes(sort.field) ? 'A to Z' :
+                       'Lowest to Highest'}
+                    </option>
+                    <option value="desc">
+                      {sort.field === 'publishYear' ? 'Newest first' :
+                       ['title', 'author', 'publisher'].includes(sort.field) ? 'Z to A' :
+                       'Highest to Lowest'}
+                    </option>
                   </select>
                   <button
                     onClick={() => {
