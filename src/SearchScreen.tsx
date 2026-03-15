@@ -206,6 +206,26 @@ export default function SearchScreen() {
           if (valA && !valB) return -1;
           if (!valA && !valB) continue;
           
+          if (sort.field === 'publishYear' || sort.field === 'isbn') {
+            let numA, numB;
+            if (sort.field === 'isbn') {
+              numA = Number(String(valA).replace(/\D/g, ''));
+              numB = Number(String(valB).replace(/\D/g, ''));
+            } else {
+              numA = parseInt(String(valA), 10);
+              numB = parseInt(String(valB), 10);
+            }
+
+            const validA = !isNaN(numA);
+            const validB = !isNaN(numB);
+
+            if (validA && validB && numA !== numB) {
+              return sort.direction === 'asc' ? numA - numB : numB - numA;
+            }
+            if (!validA && validB) return 1;
+            if (validA && !validB) return -1;
+          }
+          
           valA = String(valA).toLowerCase();
           valB = String(valB).toLowerCase();
           
