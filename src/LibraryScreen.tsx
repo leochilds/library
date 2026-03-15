@@ -1,4 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
+import { Link } from 'react-router-dom';
 import { db, type Book } from './db';
 import { BookMarked, Trash2 } from 'lucide-react';
 
@@ -29,7 +30,9 @@ export default function LibraryScreen() {
     return booksWithDetails;
   }, [], []);
 
-  const removeFromLibrary = async (libraryId: number) => {
+  const removeFromLibrary = async (e: React.MouseEvent, libraryId: number) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (confirm('Are you sure you want to remove this book from your library?')) {
       await db.library.delete(libraryId);
     }
@@ -56,9 +59,13 @@ export default function LibraryScreen() {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pb-20">
             {libraryBooks.map((book) => (
-              <div key={book.libraryId} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col relative group">
+              <Link 
+                key={book.libraryId} 
+                to={`/book/${book.id}`}
+                className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col relative group hover:shadow-md transition-shadow"
+              >
                 <button
-                  onClick={() => removeFromLibrary(book.libraryId)}
+                  onClick={(e) => removeFromLibrary(e, book.libraryId)}
                   className="absolute top-2 right-2 p-1.5 bg-white/80 backdrop-blur-sm text-red-500 rounded-full shadow-sm hover:bg-red-50 transition-colors z-10"
                   title="Remove from library"
                 >
@@ -90,7 +97,7 @@ export default function LibraryScreen() {
                     Added {new Date(book.dateAdded).toLocaleDateString()}
                   </p>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         )}
