@@ -1,40 +1,87 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Book } from './db';
-import { Search as SearchIcon, PlusCircle, CheckCircle, Loader2, BookMarked } from 'lucide-react';
+import { Search as SearchIcon, PlusCircle, CheckCircle, Loader2, BookMarked, SlidersHorizontal, X } from 'lucide-react';
+
+export interface SearchFilters {
+  query: string;
+  title: string;
+  author: string;
+  publisher: string;
+  subject: string;
+  isbn: string;
+  publishYear: string;
+}
+
+const defaultFilters: SearchFilters = {
+  query: '',
+  title: '',
+  author: '',
+  publisher: '',
+  subject: '',
+  isbn: '',
+  publishYear: ''
+};
 
 export default function SearchScreen() {
-  const [query, setQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [filters, setFilters] = useState<SearchFilters>(defaultFilters);
+  const [debouncedFilters, setDebouncedFilters] = useState<SearchFilters>(defaultFilters);
   const [apiResults, setApiResults] = useState<Book[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Debounce the search input
   useEffect(() => {
     const timer = setTimeout(() => {
-      setDebouncedQuery(query);
+      setDebouncedFilters(filters);
     }, 500);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [filters]);
+
+  const hasActiveFilters = useMemo(() => {
+    return Object.values(debouncedFilters).some(v => v.trim() !== '');
+  }, [debouncedFilters]);
 
   // Local database search
   const localSearchResults = useLiveQuery(() => {
-    if (!debouncedQuery) return [];
-    
-    const lowerQuery = debouncedQuery.toLowerCase();
+    if (!hasActiveFilters) return [];
     
     return db.books
-      .filter((book) => 
-        book.title.toLowerCase().includes(lowerQuery) || 
-        book.author.toLowerCase().includes(lowerQuery)
-      )
+      .filter((book) => {
+        let match = true;
+        
+        if (debouncedFilters.query) {
+           const lowerQuery = debouncedFilters.query.toLowerCase();
+           match = match && (book.title.toLowerCase().includes(lowerQuery) || book.author.toLowerCase().includes(lowerQuery));
+        }
+        if (debouncedFilters.title) {
+           match = match && book.title.toLowerCase().includes(debouncedFilters.title.toLowerCase());
+        }
+        if (debouncedFilters.author) {
+           match = match && book.author.toLowerCase().includes(debouncedFilters.author.toLowerCase());
+        }
+        if (debouncedFilters.publisher && book.publisher) {
+           match = match && book.publisher.toLowerCase().includes(debouncedFilters.publisher.toLowerCase());
+        }
+        if (debouncedFilters.subject && book.subject) {
+           match = match && book.subject.toLowerCase().includes(debouncedFilters.subject.toLowerCase());
+        }
+        if (debouncedFilters.isbn && book.isbn) {
+           match = match && book.isbn.toLowerCase().includes(debouncedFilters.isbn.toLowerCase());
+        }
+        if (debouncedFilters.publishYear && book.publishYear) {
+           match = match && book.publishYear.includes(debouncedFilters.publishYear);
+        }
+        
+        return match;
+      })
       .limit(20)
       .toArray();
-  }, [debouncedQuery], []);
+  }, [debouncedFilters, hasActiveFilters], []);
 
   // Remote API search
   useEffect(() => {
-    if (!debouncedQuery) {
+    if (!hasActiveFilters) {
       setApiResults([]);
       return;
     }
@@ -44,9 +91,31 @@ export default function SearchScreen() {
     const fetchApiBooks = async () => {
       setIsSearching(true);
       try {
+        // Build Google Books Query
+        const gbParts = [];
+        const baseQuery = debouncedFilters.query + (debouncedFilters.publishYear ? ` ${debouncedFilters.publishYear}` : '');
+        if (baseQuery.trim()) gbParts.push(baseQuery.trim());
+        if (debouncedFilters.title) gbParts.push(`intitle:${debouncedFilters.title}`);
+        if (debouncedFilters.author) gbParts.push(`inauthor:${debouncedFilters.author}`);
+        if (debouncedFilters.publisher) gbParts.push(`inpublisher:${debouncedFilters.publisher}`);
+        if (debouncedFilters.subject) gbParts.push(`subject:${debouncedFilters.subject}`);
+        if (debouncedFilters.isbn) gbParts.push(`isbn:${debouncedFilters.isbn}`);
+        const gbQuery = encodeURIComponent(gbParts.join('+'));
+
+        // Build Open Library Query
+        const olParams = new URLSearchParams();
+        if (debouncedFilters.query) olParams.append('q', debouncedFilters.query);
+        if (debouncedFilters.title) olParams.append('title', debouncedFilters.title);
+        if (debouncedFilters.author) olParams.append('author', debouncedFilters.author);
+        if (debouncedFilters.publisher) olParams.append('publisher', debouncedFilters.publisher);
+        if (debouncedFilters.subject) olParams.append('subject', debouncedFilters.subject);
+        if (debouncedFilters.isbn) olParams.append('isbn', debouncedFilters.isbn);
+        if (debouncedFilters.publishYear) olParams.append('publish_year', debouncedFilters.publishYear);
+        olParams.append('limit', '20');
+
         const [googleRes, olRes] = await Promise.allSettled([
-          fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(debouncedQuery)}&maxResults=20`),
-          fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(debouncedQuery)}&limit=20`)
+          gbQuery ? fetch(`https://www.googleapis.com/books/v1/volumes?q=${gbQuery}&maxResults=20`) : Promise.resolve(new Response(JSON.stringify({items: []}))),
+          fetch(`https://openlibrary.org/search.json?${olParams.toString()}`)
         ]);
 
         let googleBooks: Book[] = [];
@@ -58,7 +127,11 @@ export default function SearchScreen() {
               author: item.volumeInfo.authors?.join(', ') || 'Unknown Author',
               coverUrl: item.volumeInfo.imageLinks?.thumbnail?.replace('http:', 'https:'),
               description: item.volumeInfo.description,
-              externalId: `google_${item.id}`
+              externalId: `google_${item.id}`,
+              publisher: item.volumeInfo.publisher,
+              subject: item.volumeInfo.categories?.join(', '),
+              isbn: item.volumeInfo.industryIdentifiers?.find((id: any) => id.type === 'ISBN_13' || id.type === 'ISBN_10')?.identifier,
+              publishYear: item.volumeInfo.publishedDate?.substring(0, 4)
             }));
           } catch (e) {
             console.error('Google Books API parsing error', e);
@@ -73,7 +146,11 @@ export default function SearchScreen() {
               title: doc.title || 'Unknown Title',
               author: doc.author_name?.[0] || 'Unknown Author',
               coverUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : undefined,
-              externalId: `ol_${doc.key?.replace('/works/', '')}`
+              externalId: `ol_${doc.key?.replace('/works/', '')}`,
+              publisher: doc.publisher?.[0],
+              subject: doc.subject?.[0],
+              isbn: doc.isbn?.[0],
+              publishYear: doc.first_publish_year?.toString() || doc.publish_year?.[0]?.toString()
             }));
           } catch (e) {
             console.error('Open Library API parsing error', e);
@@ -97,7 +174,7 @@ export default function SearchScreen() {
     return () => {
       isMounted = false;
     };
-  }, [debouncedQuery]);
+  }, [debouncedFilters, hasActiveFilters]);
 
   // Combine and deduplicate local and remote results
   const combinedResults = useMemo(() => {
@@ -164,7 +241,11 @@ export default function SearchScreen() {
           author: book.author,
           coverUrl: book.coverUrl,
           description: book.description,
-          externalId: book.externalId
+          externalId: book.externalId,
+          publisher: book.publisher,
+          subject: book.subject,
+          isbn: book.isbn,
+          publishYear: book.publishYear
         });
       }
     }
@@ -184,22 +265,108 @@ export default function SearchScreen() {
   return (
     <div className="flex flex-col h-full">
       <div className="sticky top-0 bg-white p-4 shadow-sm z-10">
-        <div className="relative">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <SearchIcon className="h-5 w-5 text-gray-400" />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <SearchIcon className="h-5 w-5 text-gray-400" />
+            </div>
+            <input
+              type="text"
+              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl leading-5 bg-gray-50 placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 sm:text-sm transition-shadow"
+              placeholder="Search global catalog..."
+              value={filters.query}
+              onChange={(e) => setFilters(prev => ({ ...prev, query: e.target.value }))}
+            />
           </div>
-          <input
-            type="text"
-            className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl leading-5 bg-gray-50 placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 sm:text-sm transition-shadow"
-            placeholder="Search books by title or author..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <button
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className={`p-3 rounded-xl border transition-colors ${
+              showAdvanced || hasActiveFilters && filters.query === ''
+                ? 'bg-blue-50 border-blue-200 text-blue-600' 
+                : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
+            }`}
+            aria-label="Toggle advanced search"
+          >
+            {showAdvanced ? <X className="h-5 w-5" /> : <SlidersHorizontal className="h-5 w-5" />}
+          </button>
         </div>
+
+        {showAdvanced && (
+          <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Title</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
+                value={filters.title}
+                onChange={(e) => setFilters(prev => ({ ...prev, title: e.target.value }))}
+                placeholder="e.g. Harry Potter"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Author</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
+                value={filters.author}
+                onChange={(e) => setFilters(prev => ({ ...prev, author: e.target.value }))}
+                placeholder="e.g. J.K. Rowling"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Publisher</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
+                value={filters.publisher}
+                onChange={(e) => setFilters(prev => ({ ...prev, publisher: e.target.value }))}
+                placeholder="e.g. Bloomsbury"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Subject</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
+                value={filters.subject}
+                onChange={(e) => setFilters(prev => ({ ...prev, subject: e.target.value }))}
+                placeholder="e.g. Fantasy"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">ISBN</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
+                value={filters.isbn}
+                onChange={(e) => setFilters(prev => ({ ...prev, isbn: e.target.value }))}
+                placeholder="e.g. 9780545010221"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Publish Year</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
+                value={filters.publishYear}
+                onChange={(e) => setFilters(prev => ({ ...prev, publishYear: e.target.value }))}
+                placeholder="e.g. 1997"
+              />
+            </div>
+            <div className="col-span-1 sm:col-span-2 flex justify-end mt-2">
+              <button
+                onClick={() => setFilters(defaultFilters)}
+                className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1"
+              >
+                Clear Filters
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
-        {!debouncedQuery ? (
+        {!hasActiveFilters ? (
           <div className="text-center text-gray-500 mt-10 px-4">
             <SearchIcon className="mx-auto h-12 w-12 text-gray-300 mb-4" />
             <p className="text-lg font-medium">Find your next book</p>
@@ -212,7 +379,7 @@ export default function SearchScreen() {
           </div>
         ) : combinedResults.length === 0 ? (
           <div className="text-center text-gray-500 mt-10">
-            <p>No books found matching "{debouncedQuery}"</p>
+            <p>No books found matching your criteria</p>
           </div>
         ) : (
           <div className="space-y-4 pb-20">
@@ -233,6 +400,23 @@ export default function SearchScreen() {
                   <div className="flex-1 min-w-0">
                     <h3 className="text-base font-semibold text-gray-900 truncate leading-tight mb-1">{book.title}</h3>
                     <p className="text-sm text-gray-600 truncate">{book.author}</p>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {book.publishYear && (
+                        <span className="inline-block px-2 py-0.5 bg-gray-100 text-gray-600 text-[10px] rounded-full">
+                          {book.publishYear}
+                        </span>
+                      )}
+                      {book.publisher && (
+                        <span className="inline-block px-2 py-0.5 bg-gray-100 text-gray-600 text-[10px] rounded-full truncate max-w-[120px]">
+                          {book.publisher}
+                        </span>
+                      )}
+                      {book.isbn && (
+                        <span className="inline-block px-2 py-0.5 bg-gray-100 text-gray-600 text-[10px] rounded-full">
+                          ISBN: {book.isbn}
+                        </span>
+                      )}
+                    </div>
                     {book.description && (
                       <p className="text-xs text-gray-500 mt-2 line-clamp-2">{book.description}</p>
                     )}
