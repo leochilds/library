@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -16,6 +19,10 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.13.1"
+  },
+  "overrides": {
+    "serialize-javascript": "^7.0.3",
+    "vite": "$vite"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
